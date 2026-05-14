@@ -1,6 +1,5 @@
 #-------------------------------------------------------------------------------
 # Makefile for joycon-singer (Nintendo Switch homebrew)
-# Uses the standard devkitPro libnx Makefile template.
 #-------------------------------------------------------------------------------
 
 TARGET      := joycon-singer
@@ -11,58 +10,61 @@ APP_TITLE   := JoyCon Singer
 APP_AUTHOR  := Sergey004
 APP_VERSION := 0.0.1
 
-LIBS        := -lnx -lm
-LDFLAGS     :=
-CFLAGS      :=
-CXXFLAGS    := -std=gnu++17
-
 ifneq ($(DEVKITPRO),)
     include $(DEVKITPRO)/libnx/switch_rules
 else
     $(error DEVKITPRO is not set. Run: export DEVKITPRO=/opt/devkitpro)
 endif
 
+# --- ИСПРАВЛЕНИЕ: Явно заставляем Make использовать aarch64-компилятор в качестве линковщика
+CXX         := aarch64-none-elf-g++
+CC          := aarch64-none-elf-gcc
+LD          := $(CXX)
+
 BUILD       := build
 OUTPUT      := $(CURDIR)
+
 ARCH        := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-exec
 
-CFLAGS      += -g -Wall -O2 $(ARCH) \
+CFLAGS      := -g -Wall -O2 $(ARCH) \
                -ffunction-sections -fdata-sections \
                -D__SWITCH__ \
                $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
                -I$(DEVKITPRO)/libnx/include
 
-CXXFLAGS    += $(CFLAGS) -fno-rtti -fno-exceptions
+CXXFLAGS    := $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++17
 
-LDFLAGS     += -specs=$(DEVKITPRO)/libnx/switch.specs $(ARCH) \
-               -Wl,-Map,$(notdir $*.map) \
+LDFLAGS     := -specs=$(DEVKITPRO)/libnx/switch.specs $(ARCH) \
+               -Wl,-Map,$(TARGET).map \
                -L$(DEVKITPRO)/libnx/lib
+
+LIBS        := -lnx -lm
 
 NACP_FLAGS  := --titleid=0000000000000000
 
-# Изолируем сборку Switch-версии только от этого файла, чтобы не подцепить main_pc.cpp
-CFILES      := 
-CPPFILES    := $(SOURCES)/main_switch.cpp
-OFILES      := $(patsubst %.cpp,$(BUILD)/%.cpp.o, $(CPPFILES))
+# Строго указываем только нужный файл, чтобы не цеплять исходники для PC
+CPPFILES    := main_switch.cpp
+OFILES      := $(patsubst %.cpp,$(BUILD)/%.o, $(CPPFILES))
 DEPFILES    := $(OFILES:.o=.d)
-
-VPATH       := $(SOURCES)
 
 .PHONY: all clean
 
 all: $(OUTPUT)/$(TARGET).nro
 
-$(OUTPUT)/$(TARGET).nro: $(OUTPUT)/$(TARGET).nacp $(BUILD)/$(TARGET).elf
+$(OUTPUT)/$(TARGET).nro: $(OUTPUT)/$(TARGET).nacp $(OUTPUT)/$(TARGET).elf
 
-$(BUILD)/$(TARGET).elf: $(OFILES)
-	@mkdir -p $(BUILD)
-	$(CXX) $(LDFLAGS) $^ $(LIBS) -o $@
-
-$(BUILD)/%.cpp.o: %.cpp
+# Явное правило линковки, предотвращающее использование системного `ld`
+$(OUTPUT)/$(TARGET).elf: $(OFILES)
 	@mkdir -p $(dir $@)
+	@echo "Linking $@"
+	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
+
+$(BUILD)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	@echo "Compiling $<"
 	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
 clean:
-	@rm -rf $(BUILD) $(OUTPUT)/$(TARGET).nro $(OUTPUT)/$(TARGET).nacp $(OUTPUT)/$(TARGET).elf
+	@rm -rf $(BUILD) $(OUTPUT)/$(TARGET).nro $(OUTPUT)/$(TARGET).nacp $(OUTPUT)/$(TARGET).elf $(TARGET).map
 
 -include $(DEPFILES)
