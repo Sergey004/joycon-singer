@@ -16,8 +16,8 @@ INCLUDES    := include
 
 #--- App metadata (shown in hbmenu)
 APP_TITLE   := JoyCon Singer
-APP_AUTHOR  := YourName
-APP_VERSION := 1.0.0
+APP_AUTHOR  := Sergey004
+APP_VERSION := 0.0.1
 
 #--- Icon (optional; uses libnx default if not present)
 #ICON       := icon.jpg
