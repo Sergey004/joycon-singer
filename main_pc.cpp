@@ -25,7 +25,7 @@
 #include <hidapi/hidapi.h>
 
 #include "rumble.h"
-#include "midifile/MidiFile.h"
+#include "minimidi.h"
 
 // Nintendo VIDs / PIDs
 #define NINTENDO_VID     0x057E
@@ -51,9 +51,6 @@ static uint8_t g_timer = 0;
 
 // ----  Low-level send  ----
 
-// Send rumble-only output report 0x10
-// left4  = 4-byte rumble for left  channel (NULL → neutral)
-// right4 = 4-byte rumble for right channel (NULL → neutral)
 static void joycon_send_rumble(uint8_t *left4, uint8_t *right4) {
     uint8_t neutral[4] = RUMBLE_NEUTRAL;
     if (!left4)  left4  = neutral;
@@ -69,22 +66,18 @@ static void joycon_send_rumble(uint8_t *left4, uint8_t *right4) {
         hid_write(g_dev_l, pkt, 10);
     } else {
         // Separate Joy-Cons — each gets its own rumble-only packet
-        // Joy-Con L
         if (g_dev_l) {
             uint8_t pkt[10] = {0};
             pkt[0] = 0x10;
             pkt[1] = g_timer++ & 0x0F;
-            // Left Joy-Con: left data in bytes 2-5, neutral in 6-9
             memcpy(&pkt[2], left4,  4);
             memcpy(&pkt[6], neutral, 4);
             hid_write(g_dev_l, pkt, 10);
         }
-        // Joy-Con R
         if (g_dev_r) {
             uint8_t pkt[10] = {0};
             pkt[0] = 0x10;
             pkt[1] = g_timer++ & 0x0F;
-            // Right Joy-Con: neutral in 2-5, right data in 6-9
             memcpy(&pkt[2], neutral, 4);
             memcpy(&pkt[6], right4, 4);
             hid_write(g_dev_r, pkt, 10);
@@ -94,22 +87,19 @@ static void joycon_send_rumble(uint8_t *left4, uint8_t *right4) {
 
 // ---- Init / cleanup ----
 
-// Enable vibration via subcommand 0x48
 static void joycon_enable_vibration(hid_device *dev) {
     uint8_t pkt[12] = {0};
-    pkt[0]  = 0x01;          // Output report: subcommand
+    pkt[0]  = 0x01;
     pkt[1]  = g_timer++ & 0x0F;
-    // Neutral rumble bytes 2-9
     uint8_t neutral[4] = RUMBLE_NEUTRAL;
     memcpy(&pkt[2], neutral, 4);
     memcpy(&pkt[6], neutral, 4);
-    pkt[10] = 0x48;          // Subcommand: Enable vibration
-    pkt[11] = 0x01;          // Enable = 1
+    pkt[10] = 0x48;
+    pkt[11] = 0x01;
     hid_write(dev, pkt, 12);
-    usleep(50000);            // 50ms settle
+    usleep(50000);
 }
 
-// Set HID communication mode to 0x3F (standard full mode)
 static void joycon_set_input_mode(hid_device *dev) {
     uint8_t pkt[12] = {0};
     pkt[0]  = 0x01;
@@ -117,8 +107,8 @@ static void joycon_set_input_mode(hid_device *dev) {
     uint8_t neutral[4] = RUMBLE_NEUTRAL;
     memcpy(&pkt[2], neutral, 4);
     memcpy(&pkt[6], neutral, 4);
-    pkt[10] = 0x03;          // Subcommand: Set input report mode
-    pkt[11] = 0x30;          // Mode 0x30 = standard full report
+    pkt[10] = 0x03;
+    pkt[11] = 0x30;
     hid_write(dev, pkt, 12);
     usleep(50000);
 }
@@ -147,10 +137,7 @@ static hid_device *open_controller(uint16_t pid, const char *name) {
 static int init_controllers(CtrlMode mode) {
     if (mode == MODE_AUTO || mode == MODE_PRO) {
         g_dev_l = open_controller(PRO_CTRL_PID, "Pro Controller");
-        if (g_dev_l) {
-            g_pro_mode = 1;
-            return 1;
-        }
+        if (g_dev_l) { g_pro_mode = 1; return 1; }
     }
     if (mode == MODE_AUTO || mode == MODE_JOYCON_LR) {
         g_dev_l = open_controller(JOYCON_L_PID, "Joy-Con (L)");
@@ -178,41 +165,28 @@ static void close_controllers(void) {
 // ---- MIDI playback ----
 
 static void play_midi(const char *midi_path, float amplitude, int repeat, int interval_us) {
-    smf_t *smf = NULL;  // Use midifile library
-    // We re-use the same approach as the original: MidiFile from Craig Sapp's lib
-    smf::MidiFile midifile;
-
-    if (!midifile.read(midi_path)) {
-        fprintf(stderr, "Error: cannot read MIDI file: %s\n", midi_path);
-        return;
-    }
-
-    midifile.doTimeAnalysis();
-    midifile.linkNotePairs();
-
-    int tracks = midifile.getTrackCount();
-    printf("[joycon-singer] MIDI: %d tracks, %.1f BPM\n",
-           tracks, midifile.getTempoInBPM(0));
+    MidiSong song;
 
     do {
-        // Current active note per channel (0=right, 1=left)
-        // We only care about ch 0 and ch 1
-        float ch_freq[2] = {0.0f, 0.0f};
+        if (midi_load_file(&song, midi_path) != 0) {
+            fprintf(stderr, "Error: cannot read MIDI file: %s\n", midi_path);
+            return;
+        }
+
+        printf("[joycon-singer] MIDI: %d notes, %.1f sec\n", song.count, song.total_duration);
+
+        float ch_freq[2] = {160.0f, 160.0f};
         float ch_amp[2]  = {0.0f, 0.0f};
         double time_sec = 0.0;
+        int ei = 0;
 
-        // Flatten all events into a time-sorted list
-        midifile.joinTracks();
-
-        for (int e = 0; e < midifile[0].size() && g_running; e++) {
-            smf::MidiEvent &ev = midifile[0][e];
-
-            // Sleep until this event's time
-            double ev_time = ev.seconds;
+        while (ei < song.count && g_running) {
+            MidiNote *ev = &song.notes[ei];
+            double ev_time = ev->time_sec;
             double sleep_s = ev_time - time_sec;
+            
             if (sleep_s > 0.0) {
                 long sleep_us = (long)(sleep_s * 1e6);
-                // Sleep in small intervals so we can catch Ctrl+C
                 while (sleep_us > 0 && g_running) {
                     long chunk = sleep_us > interval_us ? interval_us : sleep_us;
                     usleep((useconds_t)chunk);
@@ -220,53 +194,45 @@ static void play_midi(const char *midi_path, float amplitude, int repeat, int in
                 }
             }
             time_sec = ev_time;
-
             if (!g_running) break;
 
-            if (!ev.isNoteOn() && !ev.isNoteOff()) continue;
+            bool changed = false;
+            while (ei < song.count && song.notes[ei].time_sec <= time_sec) {
+                MidiNote *n = &song.notes[ei++];
+                int ch = n->channel;
+                if (ch > 1) continue;
 
-            int ch = ev.getChannel();
-            if (ch > 1) continue;  // only channels 0 and 1
-
-            if (ev.isNoteOn() && ev.getVelocity() > 0) {
-                float freq = midi_note_to_freq(ev.getKeyNumber());
-                float vel_amp = (ev.getVelocity() / 127.0f) * amplitude;
-                ch_freq[ch] = freq;
-                ch_amp[ch]  = vel_amp;
-
-                // Print note info
-                const char *note_names[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
-                int octave = (ev.getKeyNumber() / 12) - 1;
-                printf("  Ch%d: %s%d  %.1f Hz  amp %.2f\n",
-                       ch, note_names[ev.getKeyNumber() % 12], octave, freq, vel_amp);
-            } else {
-                // Note off
-                ch_freq[ch] = 0.0f;
-                ch_amp[ch]  = 0.0f;
+                if (n->velocity > 0) {
+                    float freq = midi_note_to_freq(n->note);
+                    float vel_amp = (n->velocity / 127.0f) * amplitude;
+                    ch_freq[ch] = freq;
+                    ch_amp[ch]  = vel_amp;
+                    
+                    const char *nn[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+                    printf("  Ch%d: %s%d  %.1f Hz  amp %.2f\n",
+                           ch, nn[n->note % 12], (n->note / 12) - 1, freq, vel_amp);
+                } else {
+                    ch_amp[ch]  = 0.0f;
+                }
+                changed = true;
             }
 
-            // Encode and send
-            uint8_t left4[4], right4[4];
-            if (ch_amp[1] > 0.0f)
-                encode_rumble(ch_freq[1], ch_amp[1], left4);
-            else
-                encode_rumble_stop(left4);
+            if (changed) {
+                uint8_t left4[4], right4[4];
+                if (ch_amp[1] > 0.0f) encode_rumble(ch_freq[1], ch_amp[1], left4);
+                else encode_rumble_stop(left4);
 
-            if (ch_amp[0] > 0.0f)
-                encode_rumble(ch_freq[0], ch_amp[0], right4);
-            else
-                encode_rumble_stop(right4);
+                if (ch_amp[0] > 0.0f) encode_rumble(ch_freq[0], ch_amp[0], right4);
+                else encode_rumble_stop(right4);
 
-            joycon_send_rumble(left4, right4);
+                joycon_send_rumble(left4, right4);
+            }
         }
 
-        // End of file — silence
         stop_all_rumble();
+        midi_free(&song);
 
-        if (repeat && g_running) {
-            printf("[joycon-singer] Repeating...\n");
-            midifile.splitTracks();
-        }
+        if (repeat && g_running) printf("[joycon-singer] Repeating...\n");
 
     } while (repeat && g_running);
 }
