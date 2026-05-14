@@ -1,0 +1,129 @@
+# ============================================================
+#  .github/workflows/build.yml
+#  Automatic build & release for JoyCon Singer
+#
+#  Triggers:
+#    - push to main/master → build + upload artifact
+#    - push a tag v*        → build + create GitHub Release
+#
+#  Uses official devkitPro Docker image:
+#    devkitpro/devkita64:latest
+#    (includes devkitA64, libnx, switch-tools, all portlibs)
+# ============================================================
+
+name: Build NRO
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"          # e.g. v1.0.0
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-switch:
+    name: Switch NRO
+    runs-on: ubuntu-latest
+
+    # ---- Use the official devkitPro image ----
+    # Everything is pre-installed: devkitA64, libnx, switch-tools
+    container:
+      image: devkitpro/devkita64:latest
+
+    steps:
+      # 1. Checkout (with submodules if you have any)
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # 2. Install any extra apt packages not in the devkitPro image
+      #    (the image is Debian-based, sudo is available)
+      - name: Install extra dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends \
+            zip p7zip-full
+
+      # 3. Build with the standard switch Makefile
+      #    DEVKITPRO is pre-set in the Docker image to /opt/devkitpro
+      - name: Build
+        run: |
+          make -f Makefile.switch -j$(nproc)
+
+      # 4. Package the NRO into a zip for easy download
+      - name: Package
+        run: |
+          mkdir -p dist/switch/joycon-singer
+          cp joycon-singer.nro dist/switch/joycon-singer/
+          # Include a README if you have one
+          [ -f README.md ] && cp README.md dist/switch/joycon-singer/ || true
+          cd dist
+          zip -r ../joycon-singer-switch.zip .
+
+      # 5. Upload build artifact (available on every push, expires after 90 days)
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: joycon-singer-switch
+          path: joycon-singer-switch.zip
+          retention-days: 90
+
+      # 6. Create GitHub Release (only on version tags like v1.0.0)
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: joycon-singer-switch.zip
+          name: JoyCon Singer ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            ## JoyCon Singer ${{ github.ref_name }}
+
+            ### Installation
+            1. Extract `joycon-singer-switch.zip`
+            2. Copy the `switch/` folder to the root of your SD card
+            3. Launch via hbmenu
+
+            ### MIDI files
+            Place `.mid` files in `sdmc:/switch/joycon-singer/`
+
+            ### Controls
+            | Button | Action |
+            |--------|--------|
+            | A | Play / Pause |
+            | B | Back to file list |
+            | + | Next song |
+            | - | Previous song |
+            | HOME | Exit |
+
+  # ---- Optional: PC build for Linux ----
+  build-pc:
+    name: PC Build (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq libhidapi-dev
+
+      - name: Build
+        run: |
+          make -f Makefile.pc -j$(nproc)
+
+      - name: Upload PC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: joycon-singer-linux
+          path: joycon-singer
+          retention-days: 30
