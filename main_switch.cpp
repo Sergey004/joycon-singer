@@ -1,19 +1,5 @@
 // ============================================================
-//  JoyCon Singer — Nintendo Switch CFW Homebrew
-//  Multi-controller edition: до 8 пар Joy-Con = 16 моторов
-//
-//  Маппинг MIDI каналов:
-//    ch  0 → контроллер #1 Right
-//    ch  1 → контроллер #1 Left
-//    ch  2 → контроллер #2 Right
-//    ch  3 → контроллер #2 Left
-//    ...
-//    ch 14 → контроллер #8 Right
-//    ch 15 → контроллер #8 Left
-//
-//  Build:   make -f Makefile.switch
-//  Install: sdmc:/switch/joycon-singer/joycon-singer.nro
-//  MIDI:    sdmc:/switch/joycon-singer/*.mid
+//  JoyCon Singer — Nintendo Switch CFW Homebrew (Dynamic)
 // ============================================================
 
 #include <stdio.h>
@@ -29,102 +15,87 @@
 #include "rumble.h"
 #include "minimidi.h"
 
-#define APP_DIR    "sdmc:/switch/joycon-singer"
-#define MAX_PADS   8    
-#define MAX_MOTORS (MAX_PADS * 2)  
+#define APP_DIR "sdmc:/switch/joycon-singer"
 
-// ---- Vibration state ----
+// ---- Dynamic Vibration System ----
 
-typedef struct {
-    HidVibrationDeviceHandle handle[2];  
-    int   motors;     
-    bool  active;
-    float freq[2];
-    float amp[2];
-} PadVib;
+static HidVibrationDeviceHandle g_handles[2];
+static int g_vib_count = 0;
+static HidNpadIdType g_active_id = HidNpadIdType_Invalid;
+static u32 g_active_style = 0;
 
-static PadVib g_pads[MAX_PADS];
-static int    g_pad_count = 0;
-
-static const HidNpadIdType PAD_IDS[MAX_PADS] = {
-    HidNpadIdType_No1, HidNpadIdType_No2,
-    HidNpadIdType_No3, HidNpadIdType_No4,
-    HidNpadIdType_No5, HidNpadIdType_No6,
-    HidNpadIdType_No7, HidNpadIdType_No8,
-};
-
-static void vib_init_all() {
-    g_pad_count = 0;
-
-    PadVib *hh = &g_pads[g_pad_count];
-    if (R_SUCCEEDED(hidInitializeVibrationDevices(
-            hh->handle, 2,
-            HidNpadIdType_Handheld,
-            HidNpadStyleTag_NpadHandheld))) {
-        hh->motors = 2;
-        hh->active = true;
-        hh->freq[0] = hh->freq[1] = 160.0f;
-        hh->amp[0]  = hh->amp[1]  = 0.0f;
-        g_pad_count++;
+// Вызывается каждый кадр для моментального подхвата нового контроллера
+static void vib_update_handles() {
+    // Приоритет: сначала Handheld (консоль в руках), затем Player 1
+    HidNpadIdType ids[] = { HidNpadIdType_Handheld, HidNpadIdType_No1 };
+    
+    for (int i = 0; i < 2; i++) {
+        u32 style = hidGetNpadStyleSet(ids[i]);
+        if (style == 0) continue; 
+        
+        // Если контроллер поменялся (например, сняли джойконы), переинициализируем
+        if (g_active_id != ids[i] || g_active_style != style) {
+            g_active_id = ids[i];
+            g_active_style = style;
+            g_vib_count = 0;
+            
+            if (style & HidNpadStyleTag_NpadHandheld) {
+                hidInitializeVibrationDevices(g_handles, 2, ids[i], HidNpadStyleTag_NpadHandheld);
+                g_vib_count = 2;
+            } else if (style & HidNpadStyleTag_NpadJoyDual) {
+                hidInitializeVibrationDevices(g_handles, 2, ids[i], HidNpadStyleTag_NpadJoyDual);
+                g_vib_count = 2;
+            } else if (style & HidNpadStyleTag_NpadFullKey) {
+                hidInitializeVibrationDevices(g_handles, 2, ids[i], HidNpadStyleTag_NpadFullKey);
+                g_vib_count = 2;
+            } else if (style & HidNpadStyleTag_NpadJoyLeft) {
+                hidInitializeVibrationDevices(g_handles, 1, ids[i], HidNpadStyleTag_NpadJoyLeft);
+                g_vib_count = 1; // Только левый
+            } else if (style & HidNpadStyleTag_NpadJoyRight) {
+                hidInitializeVibrationDevices(g_handles, 1, ids[i], HidNpadStyleTag_NpadJoyRight);
+                g_vib_count = -1; // Только правый
+            }
+        }
+        return; 
     }
+    
+    g_active_id = HidNpadIdType_Invalid;
+    g_active_style = 0;
+    g_vib_count = 0;
+}
 
-    for (int i = 0; i < MAX_PADS && g_pad_count < MAX_PADS; i++) {
-        PadVib *pv = &g_pads[g_pad_count];
+static void send_vibration(float freq_L, float amp_L, float freq_R, float amp_R) {
+    if (g_vib_count == 0) return;
 
-        if (R_SUCCEEDED(hidInitializeVibrationDevices(
-                pv->handle, 2,
-                PAD_IDS[i],
-                HidNpadStyleTag_NpadJoyDual))) {
-            pv->motors = 2;
-            pv->active = true;
-            pv->freq[0] = pv->freq[1] = 160.0f;
-            pv->amp[0]  = pv->amp[1]  = 0.0f;
-            g_pad_count++;
-            continue;
-        }
+    HidVibrationValue values[2];
+    
+    // Left (MIDI Channel 1)
+    float fL = (freq_L < 41.0f) ? 41.0f : (freq_L > 626.0f) ? 626.0f : freq_L;
+    float aL = (amp_L < 0.0f) ? 0.0f : (amp_L > 0.8f) ? 0.8f : amp_L;
+    values[0].freq_low  = fL;
+    values[0].amp_low   = aL;
+    values[0].freq_high = (fL * 2.0f > 1252.0f) ? 1252.0f : fL * 2.0f;
+    values[0].amp_high  = aL * 0.5f;
 
-        if (R_SUCCEEDED(hidInitializeVibrationDevices(
-                pv->handle, 1,
-                PAD_IDS[i],
-                HidNpadStyleTag_NpadFullKey))) {
-            pv->motors = 1;
-            pv->active = true;
-            pv->freq[0] = pv->freq[1] = 160.0f;
-            pv->amp[0]  = pv->amp[1]  = 0.0f;
-            g_pad_count++;
-        }
+    // Right (MIDI Channel 0)
+    float fR = (freq_R < 41.0f) ? 41.0f : (freq_R > 626.0f) ? 626.0f : freq_R;
+    float aR = (amp_R < 0.0f) ? 0.0f : (amp_R > 0.8f) ? 0.8f : amp_R;
+    values[1].freq_low  = fR;
+    values[1].amp_low   = aR;
+    values[1].freq_high = (fR * 2.0f > 1252.0f) ? 1252.0f : fR * 2.0f;
+    values[1].amp_high  = aR * 0.5f;
+
+    if (g_vib_count == 2) {
+        hidSendVibrationValues(g_handles, values, 2);
+    } else if (g_vib_count == 1) {
+        hidSendVibrationValues(&g_handles[0], &values[0], 1); // Только левый
+    } else if (g_vib_count == -1) {
+        hidSendVibrationValues(&g_handles[0], &values[1], 1); // Только правый
     }
 }
 
-static void vib_set_motor(int motor_idx, float freq, float amp) {
-    int pad_idx  = motor_idx / 2;
-    int side     = motor_idx % 2;   
-    int hid_side = (side == 0) ? 1 : 0; 
-
-    if (pad_idx >= g_pad_count) return;
-    PadVib *pv = &g_pads[pad_idx];
-    if (!pv->active) return;
-
-    int actual_side = (pv->motors == 1) ? 0 : hid_side;
-
-    pv->freq[hid_side] = freq;
-    pv->amp[hid_side]  = amp;
-
-    float f = (freq  < 41.0f) ? 41.0f   : (freq  > 626.0f) ? 626.0f : freq;
-    float a = (amp   < 0.0f)  ? 0.0f    : (amp   > 0.8f)   ? 0.8f   : amp;
-
-    HidVibrationValue val = {
-        .amp_low   = a,
-        .freq_low  = f,
-        .amp_high  = a * 0.5f,
-        .freq_high = (f * 2.0f > 1252.0f) ? 1252.0f : f * 2.0f,
-    };
-    hidSendVibrationValues(&pv->handle[actual_side], &val, 1);
-}
-
-static void vib_stop_all() {
-    for (int m = 0; m < MAX_MOTORS; m++)
-        vib_set_motor(m, 160.0f, 0.0f);
+static void stop_all_vibration() {
+    send_vibration(160.0f, 0.0f, 160.0f, 0.0f);
 }
 
 // ---- File scanner ----
@@ -148,18 +119,19 @@ static void scan_files() {
     std::sort(g_files.begin(), g_files.end());
 }
 
-static void draw_controller_bar() {
-    printf(" Controllers: %d  |  Motors: ", g_pad_count);
-    int total_motors = 0;
-    for (int i = 0; i < g_pad_count; i++)
-        total_motors += g_pads[i].motors;
-    printf("%d / 16  |  MIDI ch: 0-%d\n", total_motors, total_motors - 1);
-
-    for (int i = 0; i < g_pad_count; i++) {
-        printf("  #%d [%s]", i + 1,
-               g_pads[i].motors == 2 ? "JC-L JC-R" : "Pro  ----");
-        printf("  ch %2d,%2d\n", i * 2, i * 2 + 1);
+static void draw_top_bar() {
+    printf("\n \xE2\x99\xAB  JoyCon Singer (Dynamic Mode)\n");
+    printf(" ─────────────────────────────────\n");
+    if (g_vib_count == 2) {
+        printf(" Active: Stereo (L & R motors)\n");
+    } else if (g_vib_count == 1) {
+        printf(" Active: Mono (Left motor only)\n");
+    } else if (g_vib_count == -1) {
+        printf(" Active: Mono (Right motor only)\n");
+    } else {
+        printf(" Active: NO RUMBLE CONNECTED!\n");
     }
+    printf(" ─────────────────────────────────\n\n");
 }
 
 // ---- Playback ----
@@ -170,12 +142,9 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
     const char *fname = strrchr(path, '/');
     fname = fname ? fname + 1 : path;
 
-    printf("\n \xE2\x99\xAB  JoyCon Singer\n");
+    draw_top_bar();
     printf(" Loading: %s\n\n", fname);
-    draw_controller_bar();
-    printf("\n A=Pause  B=Back  +=Next  -=Prev\n");
-    printf(" ─────────────────────────────────\n");
-    consoleUpdate(NULL); // Отрисовка интерфейса до загрузки файла
+    consoleUpdate(NULL); 
 
     MidiSong song;
     if (midi_load_file(&song, path) != 0) {
@@ -185,80 +154,75 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
         return 0;
     }
 
-    printf(" Notes: %d  Duration: %.1fs\n\n", song.count, song.total_duration);
+    printf(" A=Pause  B=Back  +=Next  -=Prev\n\n");
 
-    float motor_freq[MAX_MOTORS];
-    float motor_amp[MAX_MOTORS];
-    for (int m = 0; m < MAX_MOTORS; m++) {
-        motor_freq[m] = 160.0f;
-        motor_amp[m]  = 0.0f;
-    }
+    float freq_L = 160.0f, amp_L = 0.0f;
+    float freq_R = 160.0f, amp_R = 0.0f;
 
     double playhead   = 0.0;
     bool   paused     = false;
     int    ei         = 0;
     
-    // Переход на аппаратные часы, чтобы избежать рассинхрона из-за VSync (consoleUpdate)
     double tick_freq    = (double)armGetSystemTickFreq();
     uint64_t start_tick = armGetSystemTick();
     uint64_t pause_tick = 0;
 
     while (appletMainLoop()) {
         padUpdate(pad);
+        vib_update_handles(); 
+
         uint64_t down = padGetButtonsDown(pad);
 
-        if (down & HidNpadButton_Plus)  { vib_stop_all(); midi_free(&song); return  1; }
-        if (down & HidNpadButton_Minus) { vib_stop_all(); midi_free(&song); return -1; }
-        if (down & HidNpadButton_B)     { vib_stop_all(); midi_free(&song); return  0; }
+        if (down & HidNpadButton_Plus)  { stop_all_vibration(); midi_free(&song); return  1; }
+        if (down & HidNpadButton_Minus) { stop_all_vibration(); midi_free(&song); return -1; }
+        if (down & HidNpadButton_B)     { stop_all_vibration(); midi_free(&song); return  0; }
         if (down & HidNpadButton_A) {
             paused = !paused;
             if (paused) {
-                vib_stop_all();
+                stop_all_vibration();
                 pause_tick = armGetSystemTick();
             } else {
                 start_tick += (armGetSystemTick() - pause_tick);
             }
         }
 
-        if (paused) { 
-            consoleUpdate(NULL); // ФИКС: Обязательно обновляем экран в паузе
-            continue; 
-        }
+        if (!paused) { 
+            playhead = (double)(armGetSystemTick() - start_tick) / tick_freq;
 
-        // Вычисляем точное время с начала трека (в секундах)
-        playhead = (double)(armGetSystemTick() - start_tick) / tick_freq;
+            while (ei < song.count && song.notes[ei].time_sec <= playhead) {
+                MidiNote *n = &song.notes[ei++];
+                int ch = n->channel;
+                if (ch > 1) continue; 
 
-        bool changed = false;
-        while (ei < song.count && song.notes[ei].time_sec <= playhead) {
-            MidiNote *n = &song.notes[ei++];
-            int ch = n->channel;
-            if (ch >= MAX_MOTORS) continue;
-
-            if (n->velocity > 0) {
-                motor_freq[ch] = midi_note_to_freq(n->note);
-                motor_amp[ch]  = (n->velocity / 127.0f) * amplitude;
-                const char *nn[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
-                printf("  ch%2d: %-3s%d %.0fHz\n",
-                       ch, nn[n->note % 12], (n->note / 12) - 1, motor_freq[ch]);
-            } else {
-                motor_freq[ch] = 160.0f;
-                motor_amp[ch]  = 0.0f;
+                if (n->velocity > 0) {
+                    float f = midi_note_to_freq(n->note);
+                    float a = (n->velocity / 127.0f) * amplitude;
+                    if (ch == 0) { freq_R = f; amp_R = a; }
+                    if (ch == 1) { freq_L = f; amp_L = a; }
+                    
+                    const char *nn[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+                    printf("  [%.1fs] ch%d: %s%d  %.0fHz\n", 
+                           playhead, ch, nn[n->note % 12], (n->note / 12) - 1, f);
+                } else {
+                    if (ch == 0) { amp_R = 0.0f; }
+                    if (ch == 1) { amp_L = 0.0f; }
+                }
             }
-            changed = true;
+        } else {
+            amp_L = 0.0f;
+            amp_R = 0.0f;
         }
 
-        if (changed) {
-            for (int m = 0; m < MAX_MOTORS; m++)
-                vib_set_motor(m, motor_freq[m], motor_amp[m]);
-        }
+        // ВАЖНО: Значения вибрации теперь подаются каждый кадр!
+        // Это предотвращает отключение вибрации операционной системой.
+        send_vibration(freq_L, amp_L, freq_R, amp_R);
 
         if (ei >= song.count && playhead > song.total_duration) {
-            vib_stop_all();
+            stop_all_vibration();
             svcSleepThread(1500000000LL);
             break;
         }
 
-        // ФИКС: Обязательно вызывать consoleUpdate, чтобы новые ноты рисовались
         consoleUpdate(NULL);
     }
 
@@ -272,28 +236,29 @@ static void browser(PadState *pad) {
     int sel = 0;
 
     while (appletMainLoop()) {
+        padUpdate(pad);
+        vib_update_handles();
+
         int n = (int)g_files.size();
         consoleClear();
 
-        printf("\n \xE2\x99\xAB  JoyCon Singer\n");
-        printf(" ─────────────────────────────────\n");
-        draw_controller_bar();
-        printf(" ─────────────────────────────────\n\n");
+        draw_top_bar();
 
         if (n == 0) {
             printf(" No .mid files found in:\n  %s\n\n", APP_DIR);
-            printf(" + to rescan\n");
+            printf(" Press [+] to rescan\n");
         } else {
             for (int i = 0; i < n; i++) {
                 const char *fname = strrchr(g_files[i].c_str(), '/');
                 fname = fname ? fname + 1 : g_files[i].c_str();
                 printf(" %s %.42s\n", i == sel ? ">" : " ", fname);
             }
-            printf("\n A=Play  +/-=Select  HOME=Exit\n");
+            printf("\n A=Play  +/-=Select  B=Exit\n");
         }
 
-        padUpdate(pad);
         uint64_t down = padGetButtonsDown(pad);
+        
+        if (down & HidNpadButton_B) break;
 
         if (n == 0) {
             if (down & HidNpadButton_Plus) scan_files();
@@ -308,64 +273,4 @@ static void browser(PadState *pad) {
                     n = (int)g_files.size();
                     if (n == 0) break;
                     if (res ==  1) { cur = (cur + 1) % n; continue; }
-                    if (res == -1) { cur = (cur - 1 + n) % n; continue; }
-                    break;
-                }
-                sel = (n > 0) ? cur % n : 0;
-            }
-        }
-
-        // ФИКС: Обновляем экран каждую итерацию интерфейса
-        consoleUpdate(NULL);
-    }
-}
-
-// ---- Entry point ----
-
-int main(int argc, char *argv[]) {
-    // Инициализация консоли вывода текста
-    consoleInit(NULL);
-
-    padConfigureInput(MAX_PADS, HidNpadStyleSet_NpadStandard);
-
-    PadState pad;
-    padInitializeDefault(&pad);
-
-    printf("\n JoyCon Singer — Multi-Controller\n");
-    printf(" Scanning controllers...\n\n");
-
-    vib_init_all();
-
-    int total_motors = 0;
-    for (int i = 0; i < g_pad_count; i++)
-        total_motors += g_pads[i].motors;
-
-    if (g_pad_count == 0) {
-        printf(" WARNING: No controllers found!\n");
-        printf(" Connect Joy-Con or Pro Controller.\n\n");
-    } else {
-        printf(" Found %d controller(s), %d motor(s)\n",
-               g_pad_count, total_motors);
-        printf(" MIDI channels available: 0-%d\n\n", total_motors - 1);
-    }
-
-    mkdir(APP_DIR, 0777);
-    scan_files();
-    printf(" MIDI files found: %zu\n\n", g_files.size());
-    printf(" Connect more controllers now if needed.\n");
-    printf(" Press any button to start...\n");
-
-    while (appletMainLoop()) {
-        padUpdate(&pad);
-        if (padGetButtonsDown(&pad)) break;
-        
-        // ФИКС: Отрисовываем первый приветственный экран
-        consoleUpdate(NULL);
-    }
-
-    browser(&pad);
-
-    vib_stop_all();
-    consoleExit(NULL);
-    return 0;
-}
+                    if (res == -1) { cur = (cur - 1 +
