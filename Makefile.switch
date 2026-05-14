@@ -16,7 +16,6 @@ else
     $(error DEVKITPRO is not set. Run: export DEVKITPRO=/opt/devkitpro)
 endif
 
-# --- ИСПРАВЛЕНИЕ: Явно заставляем Make использовать aarch64-компилятор в качестве линковщика
 CXX         := aarch64-none-elf-g++
 CC          := aarch64-none-elf-gcc
 LD          := $(CXX)
@@ -24,7 +23,8 @@ LD          := $(CXX)
 BUILD       := build
 OUTPUT      := $(CURDIR)
 
-ARCH        := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-exec
+# --- ИСПРАВЛЕНИЕ: Добавлен обязательный флаг -fPIE ---
+ARCH        := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
 CFLAGS      := -g -Wall -O2 $(ARCH) \
                -ffunction-sections -fdata-sections \
@@ -42,7 +42,6 @@ LIBS        := -lnx -lm
 
 NACP_FLAGS  := --titleid=0000000000000000
 
-# Строго указываем только нужный файл, чтобы не цеплять исходники для PC
 CPPFILES    := main_switch.cpp
 OFILES      := $(patsubst %.cpp,$(BUILD)/%.o, $(CPPFILES))
 DEPFILES    := $(OFILES:.o=.d)
@@ -53,7 +52,6 @@ all: $(OUTPUT)/$(TARGET).nro
 
 $(OUTPUT)/$(TARGET).nro: $(OUTPUT)/$(TARGET).nacp $(OUTPUT)/$(TARGET).elf
 
-# Явное правило линковки, предотвращающее использование системного `ld`
 $(OUTPUT)/$(TARGET).elf: $(OFILES)
 	@mkdir -p $(dir $@)
 	@echo "Linking $@"
