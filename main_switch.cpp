@@ -30,14 +30,14 @@
 #include "minimidi.h"
 
 #define APP_DIR    "sdmc:/switch/joycon-singer"
-#define MAX_PADS   8    // Switch поддерживает до 8 контроллеров
-#define MAX_MOTORS (MAX_PADS * 2)  // L + R на каждый = 16
+#define MAX_PADS   8    
+#define MAX_MOTORS (MAX_PADS * 2)  
 
 // ---- Vibration state ----
 
 typedef struct {
-    HidVibrationDeviceHandle handle[2];  // [0]=Left, [1]=Right
-    int   motors;     // 1 (Pro) или 2 (Joy-Con pair / Handheld)
+    HidVibrationDeviceHandle handle[2];
+    int   motors;     
     bool  active;
     float freq[2];
     float amp[2];
@@ -56,7 +56,6 @@ static const HidNpadIdType PAD_IDS[MAX_PADS] = {
 static void vib_init_all() {
     g_pad_count = 0;
 
-    // Сначала Handheld (консоль в руках)
     PadVib *hh = &g_pads[g_pad_count];
     if (R_SUCCEEDED(hidInitializeVibrationDevices(
             hh->handle, 2,
@@ -69,11 +68,9 @@ static void vib_init_all() {
         g_pad_count++;
     }
 
-    // Затем до 8 внешних контроллеров
     for (int i = 0; i < MAX_PADS && g_pad_count < MAX_PADS; i++) {
         PadVib *pv = &g_pads[g_pad_count];
 
-        // Joy-Con пара (два мотора)
         if (R_SUCCEEDED(hidInitializeVibrationDevices(
                 pv->handle, 2,
                 PAD_IDS[i],
@@ -86,7 +83,6 @@ static void vib_init_all() {
             continue;
         }
 
-        // Pro Controller (один мотор)
         if (R_SUCCEEDED(hidInitializeVibrationDevices(
                 pv->handle, 1,
                 PAD_IDS[i],
@@ -100,15 +96,10 @@ static void vib_init_all() {
     }
 }
 
-// motor_idx: глобальный индекс мотора 0..15
-//   чётный = Right, нечётный = Left
 static void vib_set_motor(int motor_idx, float freq, float amp) {
     int pad_idx  = motor_idx / 2;
-    int side     = motor_idx % 2;   // 0=right(ch N), 1=left(ch N+1)
-    // В MIDI маппинге: ch 0→правый пад0, ch 1→левый пад0, ch 2→правый пад1...
-    // side 0 = правый мотор (handle[1] = Right Joy-Con)
-    // side 1 = левый  мотор (handle[0] = Left  Joy-Con)
-    int hid_side = (side == 0) ? 1 : 0;  // handle[0]=L, handle[1]=R
+    int side     = motor_idx % 2;   
+    int hid_side = (side == 0) ? 1 : 0; 
 
     if (pad_idx >= g_pad_count) return;
     PadVib *pv = &g_pads[pad_idx];
@@ -157,8 +148,6 @@ static void scan_files() {
     std::sort(g_files.begin(), g_files.end());
 }
 
-// ---- Controller status display ----
-
 static void draw_controller_bar() {
     printf(" Controllers: %d  |  Motors: ", g_pad_count);
     int total_motors = 0;
@@ -166,7 +155,6 @@ static void draw_controller_bar() {
         total_motors += g_pads[i].motors;
     printf("%d / 16  |  MIDI ch: 0-%d\n", total_motors, total_motors - 1);
 
-    // Visual: показать какие контроллеры подключены
     for (int i = 0; i < g_pad_count; i++) {
         printf("  #%d [%s]", i + 1,
                g_pads[i].motors == 2 ? "JC-L JC-R" : "Pro  ----");
@@ -197,7 +185,6 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
 
     printf(" Notes: %d  Duration: %.1fs\n\n", song.count, song.total_duration);
 
-    // Per-motor state
     float motor_freq[MAX_MOTORS];
     float motor_amp[MAX_MOTORS];
     for (int m = 0; m < MAX_MOTORS; m++) {
@@ -321,7 +308,6 @@ static void browser(PadState *pad) {
 int main(int argc, char *argv[]) {
     consoleInit(NULL);
 
-    // Разрешить все стили контроллеров для всех 8 слотов
     padConfigureInput(MAX_PADS, HidNpadStyleSet_NpadStandard);
 
     PadState pad;
@@ -332,7 +318,6 @@ int main(int argc, char *argv[]) {
 
     vib_init_all();
 
-    // Итог
     int total_motors = 0;
     for (int i = 0; i < g_pad_count; i++)
         total_motors += g_pads[i].motors;

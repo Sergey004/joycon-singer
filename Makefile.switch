@@ -1,57 +1,29 @@
 #-------------------------------------------------------------------------------
 # Makefile for joycon-singer (Nintendo Switch homebrew)
 # Uses the standard devkitPro libnx Makefile template.
-#
-# Requires:  devkitPro + devkitA64 + libnx
-# Build:     make
-# Output:    joycon-singer.nro
 #-------------------------------------------------------------------------------
 
-#--- Target name (becomes the .nro filename)
 TARGET      := joycon-singer
+SOURCES     := .
+INCLUDES    := .
 
-#--- Source directories
-SOURCES     := source
-INCLUDES    := include
-
-#--- App metadata (shown in hbmenu)
 APP_TITLE   := JoyCon Singer
 APP_AUTHOR  := Sergey004
 APP_VERSION := 0.0.1
 
-#--- Icon (optional; uses libnx default if not present)
-#ICON       := icon.jpg
-
-#--- romfs directory (optional; embed MIDI files at build time)
-#ROMFS      := romfs
-
-#--- Extra libraries (none needed for this project)
 LIBS        := -lnx -lm
-
-#--- Extra linker flags
 LDFLAGS     :=
-
-#--- Extra C flags
 CFLAGS      :=
 CXXFLAGS    := -std=gnu++17
-
-#===============================================================================
-# DO NOT EDIT BELOW THIS LINE — standard devkitPro boilerplate
-#===============================================================================
 
 ifneq ($(DEVKITPRO),)
     include $(DEVKITPRO)/libnx/switch_rules
 else
-    $(error DEVKITPRO is not set. \
-        Run: export DEVKITPRO=/opt/devkitpro \
-        or source /etc/profile.d/devkit-env.sh)
+    $(error DEVKITPRO is not set. Run: export DEVKITPRO=/opt/devkitpro)
 endif
 
-#--- Build directory
 BUILD       := build
 OUTPUT      := $(CURDIR)
-
-#--- Architecture flags (armv8-a, Cortex-A57, same as official Switch games)
 ARCH        := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-exec
 
 CFLAGS      += -g -Wall -O2 $(ARCH) \
@@ -68,17 +40,13 @@ LDFLAGS     += -specs=$(DEVKITPRO)/libnx/switch.specs $(ARCH) \
 
 NACP_FLAGS  := --titleid=0000000000000000
 
-#--- Collect source files
-CFILES      := $(foreach dir,$(SOURCES),$(wildcard $(dir)/*.c))
-CPPFILES    := $(foreach dir,$(SOURCES),$(wildcard $(dir)/*.cpp))
-OFILES      := $(patsubst %.c,  $(BUILD)/%.c.o,   $(CFILES)) \
-               $(patsubst %.cpp,$(BUILD)/%.cpp.o,  $(CPPFILES))
-
+# Изолируем сборку Switch-версии только от этого файла, чтобы не подцепить main_pc.cpp
+CFILES      := 
+CPPFILES    := $(SOURCES)/main_switch.cpp
+OFILES      := $(patsubst %.cpp,$(BUILD)/%.cpp.o, $(CPPFILES))
 DEPFILES    := $(OFILES:.o=.d)
 
 VPATH       := $(SOURCES)
-
-#--- Rules ---------------------------------------------------------------
 
 .PHONY: all clean
 
@@ -94,12 +62,7 @@ $(BUILD)/%.cpp.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
-$(BUILD)/%.c.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
-
 clean:
-	@rm -rf $(BUILD) $(OUTPUT)/$(TARGET).nro $(OUTPUT)/$(TARGET).nacp \
-	        $(OUTPUT)/$(TARGET).elf
+	@rm -rf $(BUILD) $(OUTPUT)/$(TARGET).nro $(OUTPUT)/$(TARGET).nacp $(OUTPUT)/$(TARGET).elf
 
 -include $(DEPFILES)

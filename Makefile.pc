@@ -1,33 +1,10 @@
 #-------------------------------------------------------------------------------
 # Makefile.pc — JoyCon Singer, PC / SBC / Mac build
-#
-# Usage:
-#   make -f Makefile.pc                    # native (x86-64, Apple Silicon, или ARM SBC)
-#   make -f Makefile.pc ARCH=aarch64       # кросс → RPi Zero 2W, RPi 4, Jetson, L4T
-#   make -f Makefile.pc ARCH=armv7         # кросс → RPi 2/3 32-bit, Orange Pi
-#   make -f Makefile.pc ARCH=armv6         # кросс → RPi Zero W (НЕ Zero 2W!)
-#   make -f Makefile.pc ARCH=aarch64 deploy BOARD_IP=192.168.1.X
-#
-# macOS (Intel или Apple Silicon):
-#   brew install hidapi
-#   make -f Makefile.pc
-#   # Joy-Con: пара через Bluetooth → System Settings → Bluetooth
-#   # Privacy: System Settings → Privacy & Security → Input Monitoring → добавить терминал
-#
-# RPi Zero 2W (BCM2710, Cortex-A53):
-#   ARCH=aarch64 (64-bit OS) или ARCH=armv7 (32-bit OS)
-#   BT 4.2 встроен, внешний адаптер не нужен
-#   sudo apt install libhidapi-dev bluez
-#
-# udev rule (Linux, без sudo):
-#   echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="057e", MODE="0666"' \
-#        | sudo tee /etc/udev/rules.d/70-nintendo.rules
-#   sudo udevadm control --reload-rules && sudo udevadm trigger
 #-------------------------------------------------------------------------------
 
 TARGET   := joycon-singer
-SOURCES  := source
-INCLUDES := include
+SOURCES  := .
+INCLUDES := .
 
 ARCH ?= native
 
@@ -45,21 +22,15 @@ endif
 ifeq ($(ARCH),aarch64)
     CROSS     := aarch64-linux-gnu-
     ARCHFLAGS := -march=armv8-a+crc -mtune=cortex-a53
-
 else ifeq ($(ARCH),armv7)
     CROSS     := arm-linux-gnueabihf-
-    ARCHFLAGS := -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard \
-                 -mtune=cortex-a53
-
+    ARCHFLAGS := -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a53
 else ifeq ($(ARCH),armv6)
     CROSS     := arm-linux-gnueabihf-
-    ARCHFLAGS := -march=armv6zk -mfpu=vfp -mfloat-abi=hard \
-                 -mtune=arm1176jzf-s
-
+    ARCHFLAGS := -march=armv6zk -mfpu=vfp -mfloat-abi=hard -mtune=arm1176jzf-s
 else
     CROSS     :=
     ARCHFLAGS :=
-    # Apple Silicon: добавить universal binary поддержку если нужно
     ifeq ($(OS),macos)
         ifeq ($(UNAME_M),arm64)
             ARCHFLAGS := -arch arm64
@@ -74,28 +45,13 @@ PKG := $(CROSS)pkg-config
 
 # ---- hidapi detection ----
 ifeq ($(OS),macos)
-    # Homebrew может быть в /opt/homebrew (Apple Silicon) или /usr/local (Intel)
     BREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo "/usr/local")
-
-    HIDAPI_CFLAGS := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" \
-                             pkg-config --cflags hidapi 2>/dev/null || \
-                             echo "-I$(BREW_PREFIX)/include/hidapi")
-
-    HIDAPI_LIBS   := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" \
-                             pkg-config --libs hidapi 2>/dev/null || \
-                             echo "-L$(BREW_PREFIX)/lib -lhidapi")
-
-    # macOS hidapi через IOKit (не нужен libusb)
+    HIDAPI_CFLAGS := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" pkg-config --cflags hidapi 2>/dev/null || echo "-I$(BREW_PREFIX)/include/hidapi")
+    HIDAPI_LIBS   := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" pkg-config --libs hidapi 2>/dev/null || echo "-L$(BREW_PREFIX)/lib -lhidapi")
     LDFLAGS_EXTRA := -framework IOKit -framework CoreFoundation
-
 else
-    # Linux: hidraw предпочтительнее (не требует libusb-daemon)
-    HIDAPI_CFLAGS := $(shell $(PKG) --cflags hidapi-hidraw  2>/dev/null || \
-                              $(PKG) --cflags hidapi-libusb  2>/dev/null || \
-                              echo "-I/usr/include/hidapi")
-    HIDAPI_LIBS   := $(shell $(PKG) --libs   hidapi-hidraw  2>/dev/null || \
-                              $(PKG) --libs   hidapi-libusb  2>/dev/null || \
-                              echo "-lhidapi")
+    HIDAPI_CFLAGS := $(shell $(PKG) --cflags hidapi-hidraw  2>/dev/null || $(PKG) --cflags hidapi-libusb  2>/dev/null || echo "-I/usr/include/hidapi")
+    HIDAPI_LIBS   := $(shell $(PKG) --libs   hidapi-hidraw  2>/dev/null || $(PKG) --libs   hidapi-libusb  2>/dev/null || echo "-lhidapi")
     LDFLAGS_EXTRA :=
 endif
 
@@ -128,12 +84,6 @@ $(TARGET): $(OFILES)
 	$(CXX) $^ $(LDFLAGS) -o $@
 	@echo ""
 	@echo "  OK: $(TARGET)"
-	@file $(TARGET) 2>/dev/null || true
-ifeq ($(OS),macos)
-	@echo ""
-	@echo "  NOTE: macOS может запросить разрешение"
-	@echo "  Input Monitoring в Privacy & Security"
-endif
 
 $(BUILD)/main_pc.o: $(SOURCES)/main_pc.cpp
 	@mkdir -p $(BUILD)
