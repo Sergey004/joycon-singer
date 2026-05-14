@@ -36,7 +36,7 @@
 // ---- Vibration state ----
 
 typedef struct {
-    HidVibrationDeviceHandle handle[2];
+    HidVibrationDeviceHandle handle[2];  
     int   motors;     
     bool  active;
     float freq[2];
@@ -175,10 +175,12 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
     draw_controller_bar();
     printf("\n A=Pause  B=Back  +=Next  -=Prev\n");
     printf(" ─────────────────────────────────\n");
+    consoleUpdate(NULL); // Отрисовка интерфейса до загрузки файла
 
     MidiSong song;
     if (midi_load_file(&song, path) != 0) {
         printf(" ERROR: Cannot read MIDI file!\n");
+        consoleUpdate(NULL);
         svcSleepThread(2000000000LL);
         return 0;
     }
@@ -192,10 +194,14 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
         motor_amp[m]  = 0.0f;
     }
 
-    double playhead = 0.0;
-    bool   paused   = false;
-    int    ei       = 0;
-    const long long TICK_NS = 5000000LL;  // 5ms
+    double playhead   = 0.0;
+    bool   paused     = false;
+    int    ei         = 0;
+    
+    // Переход на аппаратные часы, чтобы избежать рассинхрона из-за VSync (consoleUpdate)
+    double tick_freq    = (double)armGetSystemTickFreq();
+    uint64_t start_tick = armGetSystemTick();
+    uint64_t pause_tick = 0;
 
     while (appletMainLoop()) {
         padUpdate(pad);
@@ -206,12 +212,21 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
         if (down & HidNpadButton_B)     { vib_stop_all(); midi_free(&song); return  0; }
         if (down & HidNpadButton_A) {
             paused = !paused;
-            if (paused) vib_stop_all();
+            if (paused) {
+                vib_stop_all();
+                pause_tick = armGetSystemTick();
+            } else {
+                start_tick += (armGetSystemTick() - pause_tick);
+            }
         }
 
-        if (paused) { svcSleepThread(TICK_NS); continue; }
+        if (paused) { 
+            consoleUpdate(NULL); // ФИКС: Обязательно обновляем экран в паузе
+            continue; 
+        }
 
-        playhead += TICK_NS / 1e9;
+        // Вычисляем точное время с начала трека (в секундах)
+        playhead = (double)(armGetSystemTick() - start_tick) / tick_freq;
 
         bool changed = false;
         while (ei < song.count && song.notes[ei].time_sec <= playhead) {
@@ -243,7 +258,8 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
             break;
         }
 
-        svcSleepThread(TICK_NS);
+        // ФИКС: Обязательно вызывать consoleUpdate, чтобы новые ноты рисовались
+        consoleUpdate(NULL);
     }
 
     midi_free(&song);
@@ -299,13 +315,15 @@ static void browser(PadState *pad) {
             }
         }
 
-        svcSleepThread(16000000LL);
+        // ФИКС: Обновляем экран каждую итерацию интерфейса
+        consoleUpdate(NULL);
     }
 }
 
 // ---- Entry point ----
 
 int main(int argc, char *argv[]) {
+    // Инициализация консоли вывода текста
     consoleInit(NULL);
 
     padConfigureInput(MAX_PADS, HidNpadStyleSet_NpadStandard);
@@ -340,7 +358,9 @@ int main(int argc, char *argv[]) {
     while (appletMainLoop()) {
         padUpdate(&pad);
         if (padGetButtonsDown(&pad)) break;
-        svcSleepThread(16000000LL);
+        
+        // ФИКС: Отрисовываем первый приветственный экран
+        consoleUpdate(NULL);
     }
 
     browser(&pad);
