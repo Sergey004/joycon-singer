@@ -21,7 +21,8 @@
 
 static HidVibrationDeviceHandle g_handles[2];
 static int g_vib_count = 0;
-static HidNpadIdType g_active_id = HidNpadIdType_Invalid;
+// Используем 9999 как маркер "контроллер отключен", т.к. Invalid нет в libnx
+static u32 g_active_id = 9999; 
 static u32 g_active_style = 0;
 
 // Вызывается каждый кадр для моментального подхвата нового контроллера
@@ -33,9 +34,9 @@ static void vib_update_handles() {
         u32 style = hidGetNpadStyleSet(ids[i]);
         if (style == 0) continue; 
         
-        // Если контроллер поменялся (например, сняли джойконы), переинициализируем
-        if (g_active_id != ids[i] || g_active_style != style) {
-            g_active_id = ids[i];
+        // Если контроллер поменялся, переинициализируем моторы
+        if ((u32)ids[i] != g_active_id || style != g_active_style) {
+            g_active_id = (u32)ids[i];
             g_active_style = style;
             g_vib_count = 0;
             
@@ -59,7 +60,7 @@ static void vib_update_handles() {
         return; 
     }
     
-    g_active_id = HidNpadIdType_Invalid;
+    g_active_id = 9999;
     g_active_style = 0;
     g_vib_count = 0;
 }
@@ -213,8 +214,7 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
             amp_R = 0.0f;
         }
 
-        // ВАЖНО: Значения вибрации теперь подаются каждый кадр!
-        // Это предотвращает отключение вибрации операционной системой.
+        // Значения подаются каждый кадр, не давая системе "заглушить" мотор!
         send_vibration(freq_L, amp_L, freq_R, amp_R);
 
         if (ei >= song.count && playhead > song.total_duration) {
@@ -273,4 +273,32 @@ static void browser(PadState *pad) {
                     n = (int)g_files.size();
                     if (n == 0) break;
                     if (res ==  1) { cur = (cur + 1) % n; continue; }
-                    if (res == -1) { cur = (cur - 1 +
+                    if (res == -1) { cur = (cur - 1 + n) % n; continue; }
+                    break;
+                }
+                sel = (n > 0) ? cur % n : 0;
+            }
+        }
+
+        consoleUpdate(NULL);
+    }
+}
+
+int main(int argc, char *argv[]) {
+    consoleInit(NULL);
+
+    // Поддержка до 8 слотов, чтобы захватывать любые контроллеры
+    padConfigureInput(8, HidNpadStyleSet_NpadStandard);
+    
+    PadState pad;
+    padInitializeDefault(&pad);
+
+    mkdir(APP_DIR, 0777);
+    scan_files();
+
+    browser(&pad);
+
+    stop_all_vibration();
+    consoleExit(NULL);
+    return 0;
+}
