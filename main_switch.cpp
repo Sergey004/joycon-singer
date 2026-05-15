@@ -64,7 +64,8 @@ static void ui_hline(int row, const char *left, const char *right,
 }
 
 // Print a padded row:  | <content padded to UI_W-4> |
-static void ui_row(int row, const char *fmt, ...) {
+// Пометили как unused, чтобы компилятор не ругался, пока вы её не используете
+static __attribute__((unused)) void ui_row(int row, const char *fmt, ...) {
     char buf[512] = {};
     va_list ap;
     va_start(ap, fmt);
@@ -102,7 +103,7 @@ static void fmt_time(char *buf, size_t sz, double s) {
 
 static HidVibrationDeviceHandle g_handles[2];
 static int  g_vib_count   = 0;
-static u32  g_active_id   = (u32)HidNpadIdType_Unknown;
+static u32  g_active_id   = 9999; // Заменено на 9999 вместо несуществующего HidNpadIdType_Unknown
 static u32  g_active_style = 0;
 
 static void vib_update_handles() {
@@ -124,7 +125,7 @@ static void vib_update_handles() {
         }
         return;
     }
-    g_active_id    = (u32)HidNpadIdType_Unknown;
+    g_active_id    = 9999; // Заменено на 9999
     g_active_style = 0;
     g_vib_count    = 0;
 }
