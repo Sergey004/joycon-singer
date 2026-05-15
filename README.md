@@ -143,4 +143,4 @@ no setup needed on the CI runner.
 - Frequency range: 41–626 Hz (Joy-Con LF band)
 - Amplitude is clamped to 0.8 to protect the LRA motor
 - MIDI channels > 1 are silently ignored (only ch 0 and 1 are used, 16 ch not tested only have 1 pair of Joy-Cons)
-- Switch 2 is compatible (same Joy-Con protocol, also untested)
+- Switch 2 is compatible, on PC of course (same Joy-Con protocol, also untested)
