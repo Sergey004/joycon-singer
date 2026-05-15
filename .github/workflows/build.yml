@@ -24,6 +24,8 @@ on:
     branches:
       - main
       - master
+permissions:
+  contents: write
 
 jobs:
   build-switch:
