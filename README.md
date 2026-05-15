@@ -9,14 +9,12 @@ Port of [SteamHapticsSinger](https://github.com/CrazyCritic89/SteamHapticsSinger
 
 ```
 joycon-singer/
-├── source/
-│   ├── main_switch.cpp     ← Switch homebrew (libnx)
-│   └── main_pc.cpp         ← PC version (hidapi over Bluetooth)
-├── include/
-│   ├── rumble.h            ← Joy-Con HD Rumble encoding (shared)
-│   └── minimidi.h          ← Minimal MIDI parser (no deps, shared)
 ├── Makefile.switch         ← Switch build (devkitPro)
 ├── Makefile.pc             ← PC build (Linux/macOS)
+├── main_pc.cpp            ← PC version (hidapi over Bluetooth)
+├── main_switch.cpp         ← Switch homebrew (libnx)
+├── minimidi.h              ← Minimal MIDI parser (no deps, shared)
+├── rumble.h                ← Joy-Con HD Rumble encoding (shared)
 └── .github/workflows/
     └── build.yml           ← GitHub Actions: auto-build + release
 ```
@@ -68,14 +66,14 @@ docker run --rm -v "$(pwd):/project" -w /project \
 2. Put your `.mid` files in `sdmc:/switch/joycon-singer/`
 3. Launch via hbmenu
 
-### Controls
+### Controls (will be rewritten bc on New TUI)
 
 | Button | Action |
 |--------|--------|
 | `A` | Play / Pause |
 | `B` | Back to file list |
-| `+` | Next song |
-| `−` | Previous song |
+| `D-pad Up` | Next song |
+| `D-pad Down` | Previous song |
 | `HOME` | Exit |
 
 ---
@@ -119,6 +117,9 @@ Options:
 |---|---|
 | 0 | Right (Joy-Con R or Pro right) |
 | 1 | Left  (Joy-Con L or Pro left)  |
+| ... |
+| 15 | Right (Joy-Con R or Pro right) |
+| 16 | Left  (Joy-Con L or Pro left)  | 
 
 ---
 
@@ -141,5 +142,5 @@ no setup needed on the CI runner.
 
 - Frequency range: 41–626 Hz (Joy-Con LF band)
 - Amplitude is clamped to 0.8 to protect the LRA motor
-- MIDI channels > 1 are silently ignored (only ch 0 and 1 are used)
-- Switch 2 is compatible (same Joy-Con protocol)
+- MIDI channels > 1 are silently ignored (only ch 0 and 1 are used, 16 ch not tested only have 1 pair of Joy-Cons)
+- Switch 2 is compatible (same Joy-Con protocol, also untested)
