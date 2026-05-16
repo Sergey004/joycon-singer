@@ -32,7 +32,7 @@
 #define C_RED      "\033[1;31m"
 #define C_MAGENTA  "\033[1;35m"
 #define C_WHITE    "\033[1;37m"
-#define C_GRAY     "\033[0;90m"
+#define C_GRAY     "\033[2;37m"
 
 #define GOTO(r,c)   printf("\033[%d;%dH", (r), (c))
 #define CLEAR_EOL() printf("\033[K")
@@ -225,7 +225,7 @@ static void browser_draw(const std::vector<std::string> &files, int sel,
 
     // Title row
     GOTO(B_TITLE, 1);
-    printf(BX_V C_CYAN " \xE2\x99\xAB JoyCon Singer" C_RESET
+    printf(BX_V C_CYAN " [~] JoyCon Singer" C_RESET
            "  Motor: %s", vib_label());
     GOTO(B_TITLE, UI_W); printf(BX_V);
 
@@ -281,7 +281,7 @@ static void browser_draw(const std::vector<std::string> &files, int sel,
     ui_hline(B_SEP2, BX_ML, BX_MR);
     GOTO(B_CTRL, 1);
     printf(BX_V
-           " " C_CYAN "\xe2\x86\x91\xe2\x86\x93" C_RESET "/Stick: Select"   // ↑↓
+           " " C_CYAN "^/v" C_RESET "/Stick: Select"   // ↑↓
            "   " C_CYAN "A" C_RESET ": Play"
            "   " C_CYAN "+" C_RESET ": Rescan"
            "   " C_CYAN "B" C_RESET ": Quit");
@@ -337,7 +337,7 @@ static void player_draw_static(const char *fname, int note_count,
 
     // Title + status (updated dynamically — just leave placeholders)
     GOTO(P_TITLE,1);
-    printf(BX_V C_CYAN " \xE2\x99\xAB " C_WHITE "%-50.50s" C_RESET, fname);
+    printf(BX_V C_CYAN " [~] " C_WHITE "%-50.50s" C_RESET, fname);
     GOTO(P_TITLE, UI_W); printf(BX_V);
 
     // Sep1
@@ -389,7 +389,7 @@ static void player_draw_static(const char *fname, int note_count,
 
 static void player_update_status(const char *fname, bool paused) {
     GOTO(P_TITLE, 1);
-    printf(BX_V C_CYAN " \xE2\x99\xAB " C_WHITE "%-50.50s" C_RESET, fname);
+    printf(BX_V C_CYAN " [~] " C_WHITE "%-50.50s" C_RESET, fname);
     GOTO(P_TITLE, 57);
     if (paused) printf(C_YELLOW "[|| PAUSED ]" C_RESET);
     else        printf(C_GREEN  "[>> PLAYING]" C_RESET);
