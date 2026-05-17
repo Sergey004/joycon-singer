@@ -32,7 +32,7 @@ static inline float velocity_to_amp(int velocity, float max_amp) {
     if (velocity <= 0)   return 0.0f;
     if (velocity >= 127) return max_amp;
     float v = velocity / 127.0f;
-    return powf(v, 2.2f) * max_amp;
+    return powf(v, 1.7f) * max_amp;  // 1.7: баланс между linear и log
 }
 
 // ----------------------------------------------------------
