@@ -22,7 +22,7 @@
 #include <unistd.h>
 #include <math.h>
 #include <stdint.h>
-#include <hidapi/hidapi.h>
+#include <hidapi.h>
 
 #include "rumble.h"
 #include "minimidi.h"

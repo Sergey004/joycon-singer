@@ -45,12 +45,21 @@ PKG := $(CROSS)pkg-config
 
 # ---- hidapi detection ----
 ifeq ($(OS),macos)
-    BREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo "/usr/local")
-    HIDAPI_CFLAGS := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" pkg-config --cflags hidapi 2>/dev/null || echo "-I$(BREW_PREFIX)/include/hidapi")
-    HIDAPI_LIBS   := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" pkg-config --libs hidapi 2>/dev/null || echo "-L$(BREW_PREFIX)/lib -lhidapi")
+    BREW_PREFIX := $(shell brew --prefix hidapi 2>/dev/null || brew --prefix)
+
+    HIDAPI_CFLAGS := $(shell \
+        PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" \
+        $(PKG) --cflags hidapi 2>/dev/null || \
+        echo "-I$(BREW_PREFIX)/include")
+
+    HIDAPI_LIBS := $(shell \
+        PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" \
+        $(PKG) --libs hidapi 2>/dev/null || \
+        echo "-L$(BREW_PREFIX)/lib -lhidapi")
+
     LDFLAGS_EXTRA := -framework IOKit -framework CoreFoundation
 else
-    HIDAPI_CFLAGS := $(shell $(PKG) --cflags hidapi-hidraw  2>/dev/null || $(PKG) --cflags hidapi-libusb  2>/dev/null || echo "-I/usr/include/hidapi")
+    HIDAPI_CFLAGS := $(shell $(PKG) --cflags hidapi-hidraw  2>/dev/null || $(PKG) --cflags hidapi-libusb  2>/dev/null || echo "-I/usr/include")
     HIDAPI_LIBS   := $(shell $(PKG) --libs   hidapi-hidraw  2>/dev/null || $(PKG) --libs   hidapi-libusb  2>/dev/null || echo "-lhidapi")
     LDFLAGS_EXTRA :=
 endif
