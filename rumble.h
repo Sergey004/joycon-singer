@@ -6,6 +6,9 @@
 //  Joy-Con HD Rumble encoding — improved
 // ============================================================
 
+// Neutral / silence packet (320 Hz, 0 amplitude)
+#define RUMBLE_NEUTRAL { 0x00, 0x01, 0x40, 0x40 }
+
 #define RUMBLE_FREQ_MIN   41.0f
 #define RUMBLE_FREQ_MAX  626.0f
 #define RUMBLE_AMP_MAX     0.8f

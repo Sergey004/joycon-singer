@@ -321,7 +321,7 @@ static int midi_load_file(MidiSong *song, const char *path) {
     rewind(f);
     uint8_t *buf = (uint8_t *)malloc((size_t)size);
     if (!buf) { fclose(f); return -1; }
-    fread(buf, 1, (size_t)size, f);
+    if (fread(buf, 1, (size_t)size, f) != (size_t)size) { free(buf); fclose(f); return -1; }
     fclose(f);
     int result = midi_load_mem(song, buf, (int)size);
     free(buf);
