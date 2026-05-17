@@ -149,27 +149,19 @@ static void send_vibration(float fL, float aL, float fR, float aR) {
     //   → LF = фундаментал (полная амплитуда)
     //   → HF = 3-я гармоника (1/3 амплитуды)
     //   Если 3F > 1252 Hz — берём октаву (2F) как fallback.
-    auto hf_freq = [&](float f) {
-        float h3 = f * 3.f;
-        return cl(h3 <= 1252.f ? h3 : f * 2.f, 82.f, 1252.f);
-    };
-    auto hf_amp = [&](float a, float f) {
-        // 3-я гармоника присутствует только если она в диапазоне
-        return (f * 3.f <= 1252.f) ? a * 0.333f : a * 0.5f;
-    };
-
+    // Используем функции из rumble.h (square wave через гармоники)
     HidVibrationValue v[2] = {
         {
             .amp_low   = aL,
             .freq_low  = fL,
-            .amp_high  = hf_amp(aL, fL),
-            .freq_high = hf_freq(fL),
+            .amp_high  = hf_amp_for(fL, aL),
+            .freq_high = fold_hf_frequency(fL),
         },
         {
             .amp_low   = aR,
             .freq_low  = fR,
-            .amp_high  = hf_amp(aR, fR),
-            .freq_high = hf_freq(fR),
+            .amp_high  = hf_amp_for(fR, aR),
+            .freq_high = fold_hf_frequency(fR),
         },
     };
     if      (g_vib_count== 2) hidSendVibrationValues(g_handles,    v,    2);

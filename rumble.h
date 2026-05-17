@@ -16,11 +16,37 @@
 // Ноты вне 41-626 Hz сдвигаются на октавы вместо обрезки.
 // Сохраняет музыкальное соотношение нот.
 // ----------------------------------------------------------
+// LF диапазон: 41–626 Hz  (byte 0x01–0x7F)
+// HF диапазон: 82–1252 Hz (byte 0x0400–0xFC01)
+// encode_rumble использует LF как основу, но send_vibration
+// в main_switch.cpp отправляет HF отдельно.
+// Здесь fold только для LF — ноты выше 626 складываем вниз.
 static inline float fold_frequency(float freq) {
     if (freq <= 0.0f) return RUMBLE_FREQ_MIN;
-    while (freq < RUMBLE_FREQ_MIN) freq *= 2.0f;  // сдвиг вверх на октаву
-    while (freq > RUMBLE_FREQ_MAX) freq *= 0.5f;  // сдвиг вниз на октаву
+    while (freq < RUMBLE_FREQ_MIN) freq *= 2.0f;
+    while (freq > RUMBLE_FREQ_MAX) freq *= 0.5f;
     return freq;
+}
+
+// Для HF канала — другая граница (82–1252 Hz).
+// Если 3-я гармоника в диапазоне — используем её (square wave).
+// Если нет — октава вниз пока не влезет.
+static inline float fold_hf_frequency(float fund_freq) {
+    float h3 = fund_freq * 3.0f;
+    if (h3 >= 82.0f && h3 <= 1252.0f) return h3;
+    // fallback: октава от фундаментала
+    float f = fund_freq * 2.0f;
+    while (f < 82.0f)   f *= 2.0f;
+    while (f > 1252.0f) f *= 0.5f;
+    return f;
+}
+
+// Амплитуда HF гармоники:
+// 3-я гармоника квадратной волны = 1/3 амплитуды.
+// Если fallback на октаву — 0.5 (менее резкий тембр, но лучше чем ничего).
+static inline float hf_amp_for(float fund_freq, float amp) {
+    float h3 = fund_freq * 3.0f;
+    return (h3 >= 82.0f && h3 <= 1252.0f) ? amp * 0.333f : amp * 0.5f;
 }
 
 // ----------------------------------------------------------
