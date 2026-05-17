@@ -16,7 +16,6 @@
 #include <switch.h>
 #include "rumble.h"
 #include "minimidi.h"
-#include "sf2rumble.h"
 
 #define APP_DIR "sdmc:/switch/joycon-singer"
 
@@ -196,7 +195,6 @@ static const char *note_name(int note) {
 // ============================================================
 
 static std::vector<std::string> g_files;
-static std::string g_sf2_path;  // путь к активному SF2, пусто = нет
 
 static void scan_files() {
     g_files.clear();
@@ -213,9 +211,7 @@ static void scan_files() {
         };
         if (has_ext(".mid") || has_ext(".midi"))
             g_files.push_back(std::string(APP_DIR "/") + name);
-        // Подбираем первый найденный SF2 (один на директорию)
-        if (g_sf2_path.empty() && has_ext(".sf2"))
-            g_sf2_path = std::string(APP_DIR "/") + name;
+
     }
     closedir(dir);
     std::sort(g_files.begin(), g_files.end());
@@ -260,16 +256,6 @@ static void browser_draw(const std::vector<std::string> &files, int sel,
            "  Motor: %s", vib_label());
     GOTO(B_TITLE, UI_W); printf(BX_V);
 
-    // Info: SF2 status
-    GOTO(B_INFO - 1, 1);
-    if (!g_sf2_path.empty()) {
-        const char *sf2n = strrchr(g_sf2_path.c_str(), '/');
-        sf2n = sf2n ? sf2n + 1 : g_sf2_path.c_str();
-        printf(BX_V C_GREEN "  SF2: " C_WHITE "%.60s" C_RESET, sf2n);
-    } else {
-        printf(BX_V C_GRAY "  SF2: none (NotePool fallback)" C_RESET);
-    }
-    GOTO(B_INFO - 1, UI_W); printf(BX_V);
 
     // Separator
     ui_hline(B_SEP1, BX_ML, BX_MR);
@@ -609,11 +595,7 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
     player_update_time(0.0, song.total_duration);
     consoleUpdate(NULL);
 
-    // ---- SF2 pipeline или NotePool fallback ----
-    Sf2Rumble sf2;
-    bool use_sf2 = !g_sf2_path.empty() && sf2.load(g_sf2_path.c_str());
-
-    NotePool poolR, poolL;  // fallback если нет SF2
+    NotePool poolR, poolL;  // ch0=Right, ch1=Left
     bool  paused = false;
     int   ei     = 0;
 
@@ -622,11 +604,6 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
     uint64_t pause_tick   = 0;
     uint64_t last_display = 0;
 
-    float disp_fL = 160.f, disp_aL = 0.f;
-    float disp_fR = 160.f, disp_aR = 0.f;
-    int   disp_noteL = 60, disp_noteR = 60;
-    int   disp_polyL = 0,  disp_polyR = 0;
-
     const uint64_t DISP_INT = (uint64_t)(tick_freq * 0.033);
 
     while (appletMainLoop()) {
@@ -634,15 +611,16 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
         vib_update_handles();
         uint64_t down = padGetButtonsDown(pad);
 
-        if (down & HidNpadButton_Plus)  { stop_vibration(); if(use_sf2) sf2.unload(); midi_free(&song); return  1; }
-        if (down & HidNpadButton_Minus) { stop_vibration(); if(use_sf2) sf2.unload(); midi_free(&song); return -1; }
-        if (down & HidNpadButton_B)     { stop_vibration(); if(use_sf2) sf2.unload(); midi_free(&song); return  0; }
+        if (down & HidNpadButton_Plus)  { stop_vibration(); midi_free(&song); return  1; }
+        if (down & HidNpadButton_Minus) { stop_vibration(); midi_free(&song); return -1; }
+        if (down & HidNpadButton_B)     { stop_vibration(); midi_free(&song); return  0; }
 
         if (down & HidNpadButton_A) {
             paused = !paused;
             if (paused) {
                 stop_vibration();
-                if (use_sf2) sf2.all_notes_off();
+                poolR.clear();
+                poolL.clear();
                 pause_tick = armGetSystemTick();
             } else {
                 start_tick += armGetSystemTick() - pause_tick;
@@ -663,62 +641,39 @@ static int play_file(const char *path, float amplitude, PadState *pad) {
             bool ch_changed = false;
             while (ei < song.count && song.notes[ei].time_sec <= playhead) {
                 MidiNote *n = &song.notes[ei++];
-
-                if (use_sf2) {
-                    // SF2: все 16 каналов
+                if (n->channel == 0) {
                     if (n->velocity > 0)
-                        sf2.note_on(n->channel, n->note, n->velocity);
+                        poolR.note_on(n->note, velocity_to_amp(n->velocity, amplitude));
                     else
-                        sf2.note_off(n->channel, n->note);
-                } else {
-                    // NotePool fallback: только ch0/ch1
-                    if (n->channel == 0) {
-                        if (n->velocity > 0)
-                            poolR.note_on(n->note, velocity_to_amp(n->velocity, amplitude));
-                        else
-                            poolR.note_off(n->note);
-                    } else if (n->channel == 1) {
-                        if (n->velocity > 0)
-                            poolL.note_on(n->note, velocity_to_amp(n->velocity, amplitude));
-                        else
-                            poolL.note_off(n->note);
-                    }
+                        poolR.note_off(n->note);
+                    ch_changed = true;
+                } else if (n->channel == 1) {
+                    if (n->velocity > 0)
+                        poolL.note_on(n->note, velocity_to_amp(n->velocity, amplitude));
+                    else
+                        poolL.note_off(n->note);
+                    ch_changed = true;
                 }
-                ch_changed = true;
             }
 
-            // Получить freq/amp для моторов
-            if (use_sf2) {
-                // SF2: рендер PCM → анализ каждый тик
-                sf2.tick(&disp_fL, &disp_aL, &disp_fR, &disp_aR);
-                disp_aL *= amplitude;
-                disp_aR *= amplitude;
-                disp_polyL = disp_aL > 0.f ? 1 : 0;  // SF2 не считает ноты
-                disp_polyR = disp_aR > 0.f ? 1 : 0;
-            } else {
-                disp_fL = poolL.dominant_freq(); disp_aL = poolL.total_amp() * amplitude;
-                disp_fR = poolR.dominant_freq(); disp_aR = poolR.total_amp() * amplitude;
-                disp_noteL = poolL.dominant_note();
-                disp_noteR = poolR.dominant_note();
-                disp_polyL = poolL.count;
-                disp_polyR = poolR.count;
-            }
-
-            send_vibration(disp_fL, disp_aL, disp_fR, disp_aR);
+            send_vibration(poolL.dominant_freq(), poolL.total_amp() * amplitude,
+                           poolR.dominant_freq(), poolR.total_amp() * amplitude);
 
             uint64_t now_tick = armGetSystemTick();
             if (ch_changed || (now_tick - last_display) >= DISP_INT) {
                 last_display = now_tick;
                 player_update_time(playhead, song.total_duration);
-                player_update_channels(
-                    disp_fL, disp_aL, disp_noteL, disp_polyL,
-                    disp_fR, disp_aR, disp_noteR, disp_polyR);
+                if (ch_changed)
+                    player_update_channels(
+                        poolL.dominant_freq(), poolL.total_amp() * amplitude,
+                        poolL.dominant_note(), poolL.count,
+                        poolR.dominant_freq(), poolR.total_amp() * amplitude,
+                        poolR.dominant_note(), poolR.count);
                 consoleUpdate(NULL);
             }
 
             if (ei >= song.count && playhead > song.total_duration) {
                 stop_vibration();
-                if (use_sf2) sf2.unload();
                 svcSleepThread(1500000000LL);
                 break;
             }
