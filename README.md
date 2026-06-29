@@ -1,3 +1,5 @@
+# This project has been permanently closed 
+
 # 🎵 JoyCon Singer
 
 Plays MIDI files through **Joy-Con / Pro Controller HD Rumble** motors.  
